@@ -38,7 +38,7 @@ module "network" {
 
   name               = local.name
   cidr_block         = "10.30.0.0/16"
-  single_nat_gateway = var.environment != "prod"
+  single_nat_gateway = false
   tags               = local.tags
 }
 
@@ -58,4 +58,8 @@ module "api" {
   environment = {
     APP_ENV = var.environment
   }
+}
+
+resource "aws_s3_bucket" "thumbnails" {
+  bucket = "team-c-thumbnails"
 }

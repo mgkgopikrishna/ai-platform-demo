@@ -98,6 +98,15 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_alb" {
   ip_protocol                  = "tcp"
 }
 
+# Temporary: let engineers SSH-debug tasks
+resource "aws_vpc_security_group_ingress_rule" "service_ssh" {
+  security_group_id = aws_security_group.service.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 22
+  to_port           = 22
+  ip_protocol       = "tcp"
+}
+
 resource "aws_vpc_security_group_egress_rule" "service_https_out" {
   security_group_id = aws_security_group.service.id
   description       = "HTTPS out (image pulls, AWS APIs, dependencies)"
@@ -224,15 +233,9 @@ resource "aws_ecs_service" "this" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # Safe deploys: keep full capacity during rollout and roll back automatically
-  # if new tasks fail health checks.
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
-
-  deployment_circuit_breaker {
-    enable   = true
-    rollback = true
-  }
+  # Faster deploys
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
 
   network_configuration {
     subnets          = var.private_subnet_ids
