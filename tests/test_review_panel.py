@@ -55,7 +55,7 @@ def test_full_panel_runs_all_specialists_in_parallel_and_merges():
     ssh = next(f for f in panel["findings"] if "SSH" in f.issue)
     assert len(ssh.reviewers) == 2
     md = to_markdown(panel)
-    assert "2/4" in md and "Unparseable output from: platform" in md
+    assert "2/4" in md and "No usable review from: platform" in md
 
 
 def test_live_run_regression_merges_by_resource_not_wording():
@@ -97,3 +97,23 @@ def test_live_run_regression_merges_by_resource_not_wording():
     assert len(ecs) == 2  # reliability's two distinct problems stay distinct
     assert sum(len(f.reviewers) for f in ecs) == 3  # platform joined one of them
     assert len(merged) == 5
+
+
+class _Boom:
+    def create(self, **_):
+        raise ConnectionError("API unreachable")
+
+
+def test_one_reviewer_crashing_does_not_sink_the_panel():
+    outputs = {"security": "[]", "reliability": "[]", "cost": "[]", "platform": "[]"}
+    ok = scripted(outputs)
+    panel = run_panel(lambda n: _Boom() if n == "cost" else ok(n), DIFF, "standards")
+    assert panel["failed_reviewers"] == ["cost"]
+    assert "ConnectionError" in panel["errors"]["cost"]
+    assert "cost: ConnectionError" in to_markdown(panel)
+
+
+def test_all_reviewers_crashing_fails_loudly():
+    import pytest
+    with pytest.raises(RuntimeError, match="Every reviewer failed"):
+        run_panel(lambda n: _Boom(), DIFF, "standards")
