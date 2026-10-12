@@ -1,4 +1,4 @@
-name: PR Checks
+﻿name: PR Checks
 
 on:
   pull_request:
@@ -184,7 +184,8 @@ jobs:
   #    by consensus, with deterministic plan risk as a floor. Posts one comment.
   ai-review-panel:
     name: AI review panel
-    needs: [plan]
+    # Runs in parallel with the policy gate: a PR that fails Checkov still gets AI review,
+    # so authors see both the hard block and the explanation in one pass.
     if: vars.AI_REVIEW_PANEL == 'true'
     runs-on: ubuntu-latest
     steps:
