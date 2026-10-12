@@ -1,0 +1,98 @@
+{
+  "format_version": "1.2",
+  "resource_drift": [
+    {
+      "address": "module.api.aws_security_group.service",
+      "type": "aws_security_group",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "ingress": []
+        },
+        "after": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "from_port": 22,
+              "to_port": 22
+            }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.api.aws_appautoscaling_target.this",
+      "type": "aws_appautoscaling_target",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "max_capacity": 6
+        },
+        "after": {
+          "max_capacity": 12
+        }
+      }
+    }
+  ],
+  "resource_changes": [
+    {
+      "address": "module.api.aws_appautoscaling_target.this",
+      "type": "aws_appautoscaling_target",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "max_capacity": 12
+        },
+        "after": {
+          "max_capacity": 6
+        }
+      }
+    },
+    {
+      "address": "module.api.aws_security_group.service",
+      "type": "aws_security_group",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "ingress": [
+            {
+              "cidr_blocks": [
+                "0.0.0.0/0"
+              ],
+              "from_port": 22,
+              "to_port": 22
+            }
+          ]
+        },
+        "after": {
+          "ingress": []
+        }
+      }
+    },
+    {
+      "address": "module.api.aws_iam_role.task",
+      "type": "aws_iam_role",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "name": "team-a-prod-api-task"
+        },
+        "after": {
+          "name": "team-a-prod-api-task"
+        }
+      }
+    }
+  ]
+}

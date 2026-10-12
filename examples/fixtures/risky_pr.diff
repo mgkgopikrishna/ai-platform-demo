@@ -1,0 +1,41 @@
+diff --git a/modules/ecs-service/main.tf b/modules/ecs-service/main.tf
+--- a/modules/ecs-service/main.tf
++++ b/modules/ecs-service/main.tf
+@@ -88,6 +88,15 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_alb" {
+   ip_protocol                  = "tcp"
+ }
+ 
++# Temporary: let engineers SSH-debug tasks
++resource "aws_vpc_security_group_ingress_rule" "service_ssh" {
++  security_group_id = aws_security_group.service.id
++  cidr_ipv4         = "0.0.0.0/0"
++  from_port         = 22
++  to_port           = 22
++  ip_protocol       = "tcp"
++}
++
+@@ -214,13 +223,8 @@ resource "aws_ecs_service" "this" {
+-  deployment_minimum_healthy_percent = 100
+-  deployment_maximum_percent         = 200
+-
+-  deployment_circuit_breaker {
+-    enable   = true
+-    rollback = true
+-  }
++  # Faster deploys
++  deployment_minimum_healthy_percent = 0
++  deployment_maximum_percent         = 100
+diff --git a/teams/team-c/main.tf b/teams/team-c/main.tf
+--- a/teams/team-c/main.tf
++++ b/teams/team-c/main.tf
+@@ -40,6 +40,7 @@ module "network" {
+   name               = local.name
+   cidr_block         = "10.30.0.0/16"
+-  single_nat_gateway = var.environment != "prod"
++  single_nat_gateway = false
+   tags               = local.tags
+ }
++
++resource "aws_s3_bucket" "thumbnails" {
++  bucket = "team-c-thumbnails"
++}

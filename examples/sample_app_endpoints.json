@@ -1,0 +1,7 @@
+[
+  {"method": "GET", "path": "/healthz", "description": "Liveness check. Returns 200 {\"status\": \"ok\"}."},
+  {"method": "GET", "path": "/api/venues/{venue_id}/schedule",
+   "description": "Today's channel schedule for a venue. venue_id is an integer. Unknown venue -> 404. Invalid id -> 400."},
+  {"method": "GET", "path": "/api/channels?category={category}&limit={limit}",
+   "description": "List channels, optionally filtered by category (sports, games, news). limit is 1-100, default 10. Returns {items, pages}. Invalid limit -> 400."}
+]

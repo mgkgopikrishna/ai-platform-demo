@@ -1,0 +1,43 @@
+name: AI Preview Test
+
+# The Preview Test Agent exercises a running preview environment before merge.
+# In a real setup this runs right after a per-PR preview deploy. Run it manually
+# with no URL to watch it test the bundled sample app (which has 2 planted bugs).
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Preview URL to test (empty = start the bundled sample app)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test-preview:
+    if: vars.AI_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet -r agents/requirements.txt
+
+      - name: Start sample app
+        if: inputs.base_url == ''
+        run: |
+          nohup python3 examples/sample_app.py 8080 > app.log 2>&1 &
+          for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
+
+      - name: Run Preview Test Agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_URL: ${{ inputs.base_url || 'http://127.0.0.1:8080' }}
+        run: |
+          python3 -m agents.preview_tester --base-url "$BASE_URL" \
+            --spec examples/sample_app_endpoints.json | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"

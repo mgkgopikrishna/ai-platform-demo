@@ -1,0 +1,106 @@
+name: Drift Detection
+
+# Keeps declared state and reality converged: if someone changes infra in the
+# console, this opens (or updates) an issue for the owning team.
+on:
+  schedule:
+    - cron: "0 13 * * 1-5" # weekdays, 13:00 UTC (8am CDT / 7am CST)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+env:
+  TF_VERSION: "1.9.8"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  drift:
+    name: Drift ${{ matrix.team }}
+    if: vars.AWS_PLAN_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        team: [team-a, team-b, team-c]
+    defaults:
+      run:
+        working-directory: teams/${{ matrix.team }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Plan against live infrastructure
+        id: plan
+        run: |
+          terraform init -input=false \
+            -backend-config=../../backend.hcl \
+            -backend-config="key=${{ matrix.team }}/terraform.tfstate"
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode -out=tfplan > plan.txt 2>&1
+          code=$?
+          set -e
+          # 0 = in sync, 1 = error, 2 = drift detected
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then cat plan.txt; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        if: steps.plan.outputs.exitcode == '2'
+        with:
+          python-version: "3.12"
+
+      # Drift Triage Agent: deterministic risk first, then (optionally) AI explains
+      # each drifted resource and recommends CODIFY or REVERT.
+      - name: Triage drift
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          terraform show -json tfplan > plan.json
+          cd ../..
+          pip install --quiet -r agents/requirements.txt
+          if [ "${{ vars.AI_REVIEW_ENABLED }}" = "true" ]; then
+            python3 -m agents.drift_triage --plan "teams/${{ matrix.team }}/plan.json" --team "${{ matrix.team }}" > triage.md
+          else
+            python3 -m agents.drift_triage --plan "teams/${{ matrix.team }}/plan.json" --team "${{ matrix.team }}" --no-llm > triage.md
+          fi
+          mv triage.md "teams/${{ matrix.team }}/triage.md"
+
+      - name: Open or update drift issue
+        if: steps.plan.outputs.exitcode == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Drift detected: ${{ matrix.team }}"
+          {
+            echo "Live infrastructure for **${{ matrix.team }}** no longer matches Terraform."
+            echo
+            cat triage.md
+            echo
+            echo "<details><summary>Raw plan</summary>"
+            echo
+            echo '```'
+            grep -E '^\s*[-+~]|Plan:' plan.txt | head -100
+            echo '```'
+            echo "</details>"
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > body.md
+          gh label create drift --color B60205 --description "Infra drift from Terraform" --force
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md --label drift
+          fi

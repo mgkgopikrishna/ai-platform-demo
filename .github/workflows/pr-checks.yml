@@ -1,0 +1,208 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # OIDC to AWS for read-only plans; no long-lived keys
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.9.8"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # 1. Fast, credential-free checks that every PR must pass.
+  static:
+    name: Lint, policy & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -recursive -check -diff
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: tflint
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" -f compact
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkov policy gate
+        run: |
+          pip install --quiet checkov
+          checkov -d . --framework terraform --compact --quiet
+
+      - name: Unit tests for platform scripts
+        run: |
+          pip install --quiet pytest
+          pytest -q tests/
+
+  # 2. Work out which team stacks this PR touches.
+  detect:
+    name: Detect affected stacks
+    runs-on: ubuntu-latest
+    outputs:
+      teams: ${{ steps.detect.outputs.teams }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          teams=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | python3 scripts/changed_stacks.py)
+          echo "Affected stacks: $teams"
+          echo "teams=$teams" >> "$GITHUB_OUTPUT"
+
+  # 3. Validate and plan each affected stack in parallel.
+  plan:
+    name: Plan ${{ matrix.team }}
+    needs: [static, detect]
+    if: needs.detect.outputs.teams != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        team: ${{ fromJson(needs.detect.outputs.teams) }}
+    defaults:
+      run:
+        working-directory: teams/${{ matrix.team }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Validate (no credentials needed)
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      # Plans need a read-only AWS role. Without one, the demo stops at validate.
+      - name: Configure AWS (read-only plan role)
+        if: vars.AWS_PLAN_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: terraform plan
+        if: vars.AWS_PLAN_ROLE_ARN != ''
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config=../../backend.hcl \
+            -backend-config="key=${{ matrix.team }}/terraform.tfstate"
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+          terraform show -json tfplan > plan.json
+          # Deterministic risk facts, computed by code before any AI sees the plan.
+          (cd ../.. && python3 -m agents.plan_risk "teams/${{ matrix.team }}/plan.json" "${{ matrix.team }}") > plan-risk.md
+          cat plan-risk.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Placeholder plan (no AWS role configured)
+        if: vars.AWS_PLAN_ROLE_ARN == ''
+        run: |
+          echo "No AWS_PLAN_ROLE_ARN set; validate passed, plan skipped." > plan.txt
+          echo "Plan skipped (no AWS role), so no policy risk computed." > plan-risk.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ matrix.team }}
+          path: |
+            teams/${{ matrix.team }}/plan.txt
+            teams/${{ matrix.team }}/plan-risk.md
+          retention-days: 7
+
+  # 4. AI review: reads the diff, the plans and CLAUDE.md, then comments on the PR.
+  #    It advises; it never approves or merges. A human still owns the decision.
+  ai-review:
+    name: AI review
+    needs: [plan]
+    if: vars.AI_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plan-*
+          path: plans
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are the platform reviewer for this Terraform monorepo.
+            Read CLAUDE.md first; it is the source of truth for our standards.
+
+            Review this PR using:
+              1. The code diff (gh pr diff).
+              2. The terraform plan output for each affected team in ./plans/*/plan.txt.
+              3. The deterministic policy findings in ./plans/*/plan-risk.md. These are computed
+                 by code. Explain them, but never downgrade their severity.
+
+            Focus on, in order:
+              - Anything in the plan that DESTROYS or REPLACES a resource. Quote it.
+              - IAM or security-group changes that widen access.
+              - Teams copying logic into teams/* that belongs in a shared module.
+              - Violations of the standards in CLAUDE.md.
+              - Missing variable descriptions, validations or tests.
+
+            Rules:
+              - Be specific: file, line, why it matters, suggested fix.
+              - Do not repeat what fmt, tflint or Checkov already enforce.
+              - If the PR looks safe, say so briefly. No filler.
+              - End with a one-line risk rating: LOW, MEDIUM or HIGH.
+          claude_args: |
+            --max-turns 15
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
+
+  # 5. Optional: AI Review Panel. Four specialist reviewers in parallel, merged
+  #    by consensus, with deterministic plan risk as a floor. Posts one comment.
+  ai-review-panel:
+    name: AI review panel
+    needs: [plan]
+    if: vars.AI_REVIEW_PANEL == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet -r agents/requirements.txt
+
+      - name: Run panel
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" > pr.diff
+          python3 -m agents.review_panel --diff pr.diff > panel.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file panel.md

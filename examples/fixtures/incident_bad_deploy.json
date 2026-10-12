@@ -1,0 +1,32 @@
+{
+  "alarm_history": [
+    {"at": "2026-10-08T14:06:00Z", "summary": "Alarm updated from OK to ALARM: 5xx rate 38% > 5%"},
+    {"at": "2026-10-07T09:12:00Z", "summary": "Alarm updated from ALARM to OK"}
+  ],
+  "deployments": [
+    {"task_definition": "team-a-prod-api:42", "status": "PRIMARY", "rollout_state": "IN_PROGRESS",
+     "created_at": "2026-10-08T14:01:30Z", "running": 1, "failed_tasks": 4},
+    {"task_definition": "team-a-prod-api:41", "status": "ACTIVE", "rollout_state": "COMPLETED",
+     "created_at": "2026-10-06T16:20:00Z", "running": 2, "failed_tasks": 0}
+  ],
+  "service_events": [
+    {"at": "2026-10-08T14:07:10Z", "message": "(service team-a-prod-api) deployment ecs-svc/42 deployment failed: tasks failed to start. Circuit breaker rolling back to team-a-prod-api:41."},
+    {"at": "2026-10-08T14:05:40Z", "message": "(service team-a-prod-api) (task 9f2c) failed ELB health checks in (target-group team-a-prod-api-tg)."},
+    {"at": "2026-10-08T14:03:15Z", "message": "(service team-a-prod-api) has started 1 tasks: (task 9f2c)."},
+    {"at": "2026-10-08T14:01:35Z", "message": "(service team-a-prod-api) updated to task definition team-a-prod-api:42."}
+  ],
+  "error_logs": [
+    {"at": "2026-10-08T14:03:41Z", "message": "Traceback (most recent call last): File \"/app/config.py\", line 18, in load ... KeyError: 'CONTENT_CDN_URL'"},
+    {"at": "2026-10-08T14:04:02Z", "message": "ERROR app: failed to build playlist for venue 2207: config not loaded"},
+    {"at": "2026-10-08T14:04:02Z", "message": "ERROR app: failed to build playlist for venue 5120: config not loaded"},
+    {"at": "2026-10-08T14:05:10Z", "message": "ERROR uvicorn: Exception in ASGI application ... RuntimeError: config not loaded"}
+  ],
+  "task_definition_diff": {
+    "image": {"previous": "123456789012.dkr.ecr.us-east-1.amazonaws.com/team-a-api:1.18.2",
+              "current": "123456789012.dkr.ecr.us-east-1.amazonaws.com/team-a-api:1.19.0"},
+    "env_added": ["FEATURE_TRIVIA_V2"],
+    "env_removed": ["CONTENT_CDN_URL"],
+    "secrets_added": [],
+    "secrets_removed": []
+  }
+}
