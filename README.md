@@ -62,7 +62,7 @@ pytest -q tests/
 ```
 
 Current status: all stacks validate, tflint is clean, Checkov is 119 passed /
-0 failed (29 inline skips, each with a written reason), and 33/33 tests pass
+0 failed (29 inline skips, each with a written reason), and 35/35 tests pass
 (script, agent loop, guardrails, plan risk, and agents run offline with a
 scripted model).
 

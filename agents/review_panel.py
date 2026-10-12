@@ -152,12 +152,21 @@ def run_panel(llm_factory: Callable[[str], LLM], diff: str, standards: str,
 
     def review(name: str):
         system = SYSTEM_TEMPLATE.format(name=name, focus=SPECIALISTS[name])
-        return name, run_agent(llm_factory(name), system, "Review this pull request.", tools, max_steps)
+        try:
+            return name, run_agent(llm_factory(name), system, "Review this pull request.", tools, max_steps), None
+        except Exception as exc:  # one reviewer failing (API error, timeout) must not sink the panel
+            return name, None, f"{type(exc).__name__}: {exc}"
 
     with ThreadPoolExecutor(max_workers=len(SPECIALISTS)) as pool:
-        runs = dict(pool.map(review, SPECIALISTS))
+        results = list(pool.map(review, SPECIALISTS))
 
-    parsed, failed = {}, []
+    runs = {name: res for name, res, err in results if res is not None}
+    errors = {name: err for name, res, err in results if err is not None}
+    if len(errors) == len(SPECIALISTS):
+        # Nothing reviewed at all: fail loudly instead of posting an empty "all clear".
+        raise RuntimeError("Every reviewer failed: " + "; ".join(f"{k}: {v}" for k, v in errors.items()))
+
+    parsed, failed = {}, list(errors)
     for name, res in runs.items():
         items = parse_findings(res.final_text)
         if items is None:
@@ -168,7 +177,7 @@ def run_panel(llm_factory: Callable[[str], LLM], diff: str, standards: str,
     det_risk = (plan_summary or {}).get("risk", "LOW")
     findings = merge(parsed)
     return {"findings": findings, "verdict": verdict(findings, det_risk), "deterministic_risk": det_risk,
-            "failed_reviewers": failed, "runs": runs}
+            "failed_reviewers": failed, "errors": errors, "runs": runs}
 
 
 def to_markdown(panel: dict) -> str:
@@ -177,7 +186,11 @@ def to_markdown(panel: dict) -> str:
            f"{n} specialist reviewers ran in parallel. Deterministic plan risk: "
            f"**{panel['deterministic_risk']}** (the panel can raise this, never lower it).", ""]
     if panel["failed_reviewers"]:
-        out += [f"⚠️ Unparseable output from: {', '.join(panel['failed_reviewers'])}. Treat their area as unreviewed.", ""]
+        out += [f"⚠️ No usable review from: {', '.join(panel['failed_reviewers'])}. Treat their area as unreviewed.", ""]
+        for name, err in panel.get("errors", {}).items():
+            out.append(f"   {name}: {err[:200]}")
+        if panel.get("errors"):
+            out.append("")
     if panel["findings"]:
         out += ["| Severity | Consensus | File | Issue | Suggested fix |", "|---|---|---|---|---|"]
         for f in panel["findings"]:

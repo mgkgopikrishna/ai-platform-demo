@@ -50,7 +50,7 @@ Show: `examples/fixtures/incident_bad_deploy.json`. Explain the story (a deploy 
 > "Teams should own *what* is different about their service, not re-solve networking and alarms. Shared modules mean a fix lands once and every team gets it on the next plan."
 
 **"Do these agents actually work?"**
-> "The loop, the guardrails and the tools are covered by 33 offline tests, with a scripted model standing in for the LLM. Live output quality depends on the model, which is exactly why facts come from deterministic code and every report shows its audit trail. In a real rollout I'd measure how often engineers act on the findings."
+> "The loop, the guardrails and the tools are covered by 35 offline tests, with a scripted model standing in for the LLM. Live output quality depends on the model, which is exactly why facts come from deterministic code and every report shows its audit trail. In a real rollout I'd measure how often engineers act on the findings."
 
 **"Why four reviewers instead of one?"**
 > "A single generalist reviewer skims. Narrow specialists go deeper, and when two or three independently flag the same line, that's a strong signal. The merge is plain code, not another AI, so the verdict is reproducible. It costs about four times as much, so I'd use it on shared-module changes, not every small PR."
